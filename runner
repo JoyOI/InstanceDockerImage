@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+import sys
+import os
+import time
+import subprocess
+import json
+import psutil
+
+ResultJsonPath = "result.json"
+StdinPath = "stdin.txt"
+StdoutPath = "stdout.txt"
+StderrPath = "stderr.txt"
+
+def clearFiles():
+	if os.path.isfile(ResultJsonPath):
+		os.unlink(ResultJsonPath)
+	if os.path.isfile(StdoutPath):
+		os.unlink(StdoutPath)
+	if os.path.isfile(StderrPath):
+		os.unlink(StderrPath)
+
+def writeResult(obj):
+	with open(ResultJsonPath, "wb") as result:
+		jsonBytes = json.dumps(obj).encode("utf-8")
+		result.write(jsonBytes)
+		result.write(b"\n")
+
+def getMemoryUsage(pid):
+	""" it return RSS, not VMS """
+	try:
+		p = psutil.Process(pid)
+		return p.memory_info().rss
+	except psutil.NoSuchProcess:
+		pass
+	return 0
+
+def nowInMillisecond():
+	return int(time.time() * 1000)
+
+def run(limitTimeMs, cmdline):
+	if not os.path.isfile(StdinPath):
+		open(StdinPath, "wb").close()
+	with open(StdinPath, "rb") as stdin, open(StdoutPath, "wb") as stdout, open(StderrPath, "wb") as stderr:
+		startTime = nowInMillisecond()
+		peakMemory = 0
+		exitCode = 0
+		error = ""
+		proc = subprocess.Popen(
+			cmdline,
+			shell=True,
+			stdin=stdin,
+			stdout=stdout,
+			stderr=stderr)
+		while True:
+			exitCode = proc.poll()
+			if exitCode is not None:
+				break
+			peakMemory = max(peakMemory, getMemoryUsage(proc.pid))
+			if nowInMillisecond() - startTime > limitTimeMs:
+				error = "killed by timeout"
+				proc.kill()
+				break
+			time.sleep(0.001)
+		exitCode = proc.poll()
+		usedTime = nowInMillisecond() - startTime
+		writeResult({
+			"Command": cmdline,
+			"UsedTime": usedTime,
+			"PeakMemory": peakMemory, # maybe 0 if process exited so quick
+			"ExitCode": exitCode,
+			"Error": error
+		})
+
+def main():
+	"""
+		Input:
+			First Line: execute time limit in milliseconds
+			Second Line: command line
+			stdin.txt (optional)
+		Output:
+			stdout.txt
+			stderr.txt
+			result.json
+	"""
+	limitTimeMs = 0
+	cmdline = ""
+	try:
+		clearFiles()
+		limitTimeMs = int(input())
+		cmdline = input()
+		run(limitTimeMs, cmdline)
+	except Exception as e:
+		writeResult({
+			"Command": cmdline,
+			"UsedTime": 0,
+			"PeakMemory": 0,
+			"ExitCode": -1,
+			"Error": repr(e)
+		})
+
+if __name__ == "__main__":
+	main()
