@@ -6,7 +6,7 @@ import subprocess
 import json
 import psutil
 
-ResultJsonPath = "result.json"
+ResultJsonPath = "runner.json"
 StdinPath = "stdin.txt"
 StdoutPath = "stdout.txt"
 StderrPath = "stderr.txt"
