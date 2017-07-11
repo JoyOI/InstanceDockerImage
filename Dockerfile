@@ -4,8 +4,10 @@ WORKDIR /workdir
 COPY ./runner /usr/bin
 COPY ./run-actor.sh /workdir
 COPY ./actor.csproj /workdir/actor/
+COPY ./Program.cs /workdir/actor/
 
 RUN chmod +x /usr/bin/runner
+RUN chmod +x /workdir/run-actor.sh
 
 RUN sed -i 's/archive.ubuntu.com/cn.archive.ubuntu.com/g' /etc/apt/sources.list
 RUN apt-get update
@@ -19,4 +21,4 @@ RUN apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 417A0893
 RUN apt-get update
 RUN apt-get install dotnet-sdk-2.0.0-preview2-006497 -y
 
-RUN cd /workdir/actor && dotnet restore && cd ..
+RUN cd /workdir/actor && dotnet restore && dotnet build && cd ..
