@@ -11,3 +11,8 @@ Please keep these files updated.
 ``` text
 docker build -t joyoi .
 ```
+
+# Remote docker image
+
+Docker image on docker hub are updated with this repository:<br/>
+https://hub.docker.com/r/yuko/joyoi/
