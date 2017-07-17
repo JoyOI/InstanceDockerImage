@@ -25,76 +25,135 @@ def writeResult(obj):
 		result.write(jsonBytes)
 		result.write(b"\n")
 
-def getMemoryUsage(pid):
-	""" it return RSS, not VMS """
-	try:
-		p = psutil.Process(pid)
-		return p.memory_info().rss
-	except psutil.NoSuchProcess:
-		pass
-	return 0
-
 def nowInMillisecond():
 	return int(time.time() * 1000)
 
-def run(limitTimeMs, cmdline):
+def killRecursive(psutilProc):
+	"""kill process and it's childs"""
+	try:
+		for childProc in psutilProc.children(recursive=True):
+			try:
+				childProc.kill()
+			except psutil.NoSuchProcess:
+				pass
+		psutilProc.kill()
+	except psutil.NoSuchProcess:
+		pass
+
+def getUsedMemoryInBytes(psutilProc):
+	"""get maximum used memory in bytes from process and it's childs, return RSS not VMS"""
+	try:
+		rss = psutilProc.memory_info().rss
+		for childProc in psutilProc.children(recursive=True):
+			try:
+				rss = max(rss, childProc.memory_info().rss)
+			except psutil.NoSuchProcess:
+				pass
+		return rss
+	except psutil.NoSuchProcess:
+		return 0
+
+def getUserTimeInMilliseconds(psutilProc):
+	"""get maximum user time in milliseconds from process and it's childs"""
+	try:
+		userTime = psutilProc.cpu_times().user
+		for childProc in psutilProc.children(recursive=True):
+			try:
+				userTime = max(userTime, childProc.cpu_times().user)
+			except psutil.NoSuchProcess:
+				pass
+		return int(userTime * 1000)
+	except psutil.NoSuchProcess:
+		return 0
+
+def run(userLimitMs, totalLimitMs, cmdline):
+	userTime = 0
+	totalTime = 0
+	peakMemory = 0 # RSS, not VMS
+	exitCode = 0
+	isTimeout = False
+	error = ""
 	if not os.path.isfile(StdinPath):
 		open(StdinPath, "wb").close()
 	with open(StdinPath, "rb") as stdin, open(StdoutPath, "wb") as stdout, open(StderrPath, "wb") as stderr:
 		startTime = nowInMillisecond()
-		peakMemory = 0
-		exitCode = 0
-		error = ""
 		proc = subprocess.Popen(
 			cmdline,
 			shell=True,
 			stdin=stdin,
 			stdout=stdout,
 			stderr=stderr)
+		try:
+			psutilProc = psutil.Process(proc.pid)
+		except psutil.NoSuchProcess:
+			pass
 		while True:
 			exitCode = proc.poll()
 			if exitCode is not None:
 				break
-			peakMemory = max(peakMemory, getMemoryUsage(proc.pid))
-			if nowInMillisecond() - startTime > limitTimeMs:
-				error = "killed by timeout"
-				proc.kill()
+			if psutilProc is None:
+				error = "process exist but get it's information failed"
+				break
+			peakMemory = max(peakMemory, getUsedMemoryInBytes(psutilProc))
+			userTime = max(userTime, getUserTimeInMilliseconds(psutilProc))
+			if userTime > userLimitMs:
+				isTimeout = True
+				error = "killed by timeout(user)"
+				killRecursive(psutilProc)
+				break
+			if nowInMillisecond() - startTime > totalLimitMs:
+				isTimeout = True
+				error = "killed by timeout(total)"
+				killRecursive(psutilProc)
 				break
 			time.sleep(0.001)
 		exitCode = proc.poll()
-		usedTime = nowInMillisecond() - startTime
-		writeResult({
-			"Command": cmdline,
-			"UsedTime": usedTime,
-			"PeakMemory": peakMemory, # maybe 0 if process exited so quick
-			"ExitCode": exitCode,
-			"Error": error
-		})
+		totalTime = nowInMillisecond() - startTime
+	if exitCode != 0 and not error:
+		with open(StderrPath, "rb") as stderr:
+			errorBytes = stderr.read()
+			try:
+				error = errorBytes.decode("utf-8")
+			except UnicodeDecodeError:
+				pass
+	writeResult({
+		"Command": cmdline,
+		"UserTime": userTime,
+		"TotalTime": totalTime,
+		"PeakMemory": peakMemory, # maybe 0 if process exited so quick
+		"ExitCode": exitCode,
+		"IsTimeout": isTimeout,
+		"Error": error
+	})
 
 def main():
 	"""
 		Input:
-			First Line: execute time limit in milliseconds
-			Second Line: command line
+			First Line: user_time_limit_in_milliseconds [total_time_limit_in_milliseconds]
+			Second Line: command_line
 			stdin.txt (optional)
 		Output:
 			stdout.txt
 			stderr.txt
-			result.json
+			runner.json
 	"""
 	limitTimeMs = 0
 	cmdline = ""
 	try:
 		clearFiles()
-		limitTimeMs = int(input())
+		limitMs = input().split()
 		cmdline = input()
-		run(limitTimeMs, cmdline)
+		userLimitMs = int(limitMs[0])
+		totalLimitMs = int(limitMs[1]) if (len(limitMs) > 1) else (userLimitMs * 2)
+		run(userLimitMs, totalLimitMs, cmdline)
 	except Exception as e:
 		writeResult({
 			"Command": cmdline,
-			"UsedTime": 0,
+			"UserTime": 0,
+			"TotalTime": 0,
 			"PeakMemory": 0,
 			"ExitCode": -1,
+			"IsTimeout": False,
 			"Error": repr(e)
 		})
 
