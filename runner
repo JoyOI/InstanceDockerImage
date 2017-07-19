@@ -70,7 +70,7 @@ def run(userLimitMs, totalLimitMs, cmdline):
 	userTime = 0
 	totalTime = 0
 	peakMemory = 0 # RSS, not VMS
-	exitCode = 0
+	exitCode = None
 	isTimeout = False
 	error = ""
 	if not os.path.isfile(StdinPath):
@@ -109,6 +109,8 @@ def run(userLimitMs, totalLimitMs, cmdline):
 			time.sleep(0.001)
 		exitCode = proc.poll()
 		totalTime = nowInMillisecond() - startTime
+	if exitCode is None:
+		exitCode = -1 # kill signal sent but still exist
 	if exitCode != 0 and not error:
 		with open(StderrPath, "rb") as stderr:
 			errorBytes = stderr.read()
