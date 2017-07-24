@@ -1,4 +1,4 @@
-FROM joyoi-base
+FROM yuko/joyoi-base
 
 WORKDIR /workdir
 
