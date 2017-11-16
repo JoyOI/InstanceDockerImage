@@ -12,6 +12,22 @@ StdinPath = "stdin.txt"
 StdoutPath = "stdout.txt"
 StderrPath = "stderr.txt"
 RunAs = "runner" # set to None if use root or not on linux
+ReserveMemory = 50*1024*1024 # 50MB
+MaxMemory = 1*1024*1024*1024 # 1GB
+
+def updateMaxMemory():
+	global MaxMemory
+	memAvailable = MaxMemory
+	cgroupLimit = MaxMemory
+	with open("/proc/meminfo", "rb") as result:
+		for line in result:
+			if line.startswith(b"MemAvailable:"):
+				memAvailable = int(line.split()[1]) * 1024
+	with open("/sys/fs/cgroup/memory/memory.stat", "rb") as result:
+		for line in result:
+			if line.startswith(b"hierarchical_memory_limit"):
+				cgroupLimit = int(line.split()[1])
+	MaxMemory = min(MaxMemory, memAvailable, cgroupLimit) - ReserveMemory
 
 def clearFiles():
 	if os.path.isfile(ResultJsonPath):
@@ -20,6 +36,35 @@ def clearFiles():
 		os.unlink(StdoutPath)
 	if os.path.isfile(StderrPath):
 		os.unlink(StderrPath)
+
+def limitVirtualMemory(virtualMemoryLimitMb):
+	"""this would cause some program like java or nodejs fail, because they require large VMS"""
+	if not RunAs:
+		return
+	virtualMemoryLimit = None
+	if virtualMemoryLimitMb < 0:
+		# default limit
+		virtualMemoryLimit = MaxMemory
+	elif virtualMemoryLimitMb == 0:
+		# no limit
+		pass
+	else:
+		# manual limit
+		virtualMemoryLimit = virtualMemoryLimitMb * 1024 * 1024
+	# commit to /etc/security/limits.conf, unit is kb
+	# example: runner hard as 512000
+	limitsText = b""
+	limitLine = ("%s hard as"%RunAs).encode("utf-8")
+	with open("/etc/security/limits.conf", "rb") as result:
+		for line in result:
+			if line.startswith(limitLine):
+				continue
+			limitsText += line.strip() + b"\n"
+	if virtualMemoryLimit is not None:
+		limitsText += limitLine
+		limitsText += (" %d\n"%int(virtualMemoryLimit / 1024)).encode("utf-8")
+	with open("/etc/security/limits.conf", "wb") as result:
+		result.write(limitsText)
 
 def writeResult(obj):
 	with open(ResultJsonPath, "wb") as result:
@@ -103,6 +148,7 @@ def run(userLimitMs, totalLimitMs, cmdline):
 	peakMemory = 0 # RSS, not VMS
 	exitCode = None
 	isTimeout = False
+	isOOM = False
 	error = ""
 	cmdOption = [ "su", RunAs, "-c", cmdline ] if RunAs else cmdline
 	shellOption = False if RunAs else cmdline
@@ -139,6 +185,11 @@ def run(userLimitMs, totalLimitMs, cmdline):
 				error = "killed by timeout(total)"
 				killRecursive(psutilProc)
 				break
+			if peakMemory >= MaxMemory:
+				isOOM = True
+				error = "killed by OOM"
+				killRecursive(psutilProc)
+				break
 			time.sleep(0.001)
 		exitCode = proc.poll()
 		totalTime = nowInMillisecond() - startTime
@@ -159,13 +210,14 @@ def run(userLimitMs, totalLimitMs, cmdline):
 		"PeakMemory": peakMemory, # maybe 0 if process exited so quick
 		"ExitCode": exitCode,
 		"IsTimeout": isTimeout,
+		"IsOOM": isOOM,
 		"Error": error
 	})
 
 def main():
 	"""
 		Input:
-			First Line: user_time_limit_in_milliseconds [total_time_limit_in_milliseconds]
+			First Line: user_time_limit_in_ms [total_time_limit_in_ms] [virtual_memory_limit_in_mb]
 			Second Line: command_line
 			stdin.txt (optional)
 		Output:
@@ -176,11 +228,14 @@ def main():
 	limitTimeMs = 0
 	cmdline = ""
 	try:
+		updateMaxMemory()
 		clearFiles()
-		limitMs = input().split()
+		limits = input().split()
 		cmdline = input()
-		userLimitMs = int(limitMs[0])
-		totalLimitMs = int(limitMs[1]) if (len(limitMs) > 1) else (userLimitMs * 2)
+		userLimitMs = int(limits[0])
+		totalLimitMs = int(limits[1]) if (len(limits) > 1) else (userLimitMs * 2)
+		virtualMemoryLimitMb = int(limits[2]) if (len(limits) > 2) else -1
+		limitVirtualMemory(virtualMemoryLimitMb)
 		run(userLimitMs, totalLimitMs, cmdline)
 	except Exception as e:
 		writeResult({
