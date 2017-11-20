@@ -18,3 +18,7 @@ RUN echo "runner hard nproc 256" >> /etc/security/limits.conf
 RUN echo "root:$(cat /dev/urandom | head -c 30 | base64)" | chpasswd
 
 RUN cd /actor && dotnet restore && dotnet build && cd ..
+RUN mkdir /workdir/net
+RUN cp /actor/actor.csproj /workdir/net/net.csproj
+RUN chmod 777 -R /workdir/net
+RUN su runner -c "cd /workdir/net && dotnet restore && dotnet build"
