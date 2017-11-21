@@ -16,7 +16,8 @@ RUN chmod 777 -R /workdir
 
 RUN useradd -m runner
 RUN echo "runner hard nice 19" >> /etc/security/limits.conf
-RUN echo "runner hard nproc 1024" >> /etc/security/limits.conf
+# WTF
+RUN echo "runner hard nproc 2048" >> /etc/security/limits.conf
 RUN echo "root:$(cat /dev/urandom | head -c 30 | base64)" | chpasswd
 
 RUN cd /actor && dotnet restore && dotnet build && cd ..
