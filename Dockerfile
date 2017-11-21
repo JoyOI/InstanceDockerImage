@@ -19,9 +19,10 @@ RUN echo "root:$(cat /dev/urandom | head -c 30 | base64)" | chpasswd
 
 RUN cd /actor && dotnet restore && dotnet build && cd ..
 
-RUN mkdir /workdir/net
-RUN cp /actor/actor.csproj /workdir/net/net.csproj
-RUN cp /actor/Program.cs /workdir/net/Program.cs
-RUN chmod 777 -R /workdir/net
-RUN su runner -c "cd /workdir/net && dotnet restore && dotnet build"
-RUN rm -rf /workdir/net
+RUN rm -rf /workdir/*
+RUN su runner -c "cd /workdir && dotnet new console -lang C# && dotnet run"
+RUN rm -rf /workdir/*
+RUN su runner -c "cd /workdir && dotnet new console -lang F# && dotnet run"
+RUN rm -rf /workdir/*
+RUN su runner -c "cd /workdir && dotnet new console -lang VB && dotnet run"
+RUN rm -rf /workdir/*
