@@ -3,11 +3,13 @@ FROM yuko/joyoi-base
 WORKDIR /workdir
 
 COPY ./runner /usr/bin
+COPY ./javac-jar.sh /usr/bin/javac-jar
 COPY ./run-actor.sh /actor/
 COPY ./actor.csproj /actor/
 COPY ./Program.cs /actor/
 
 RUN chmod +x /usr/bin/runner
+RUN chmod +x /usr/bin/javac-jar
 RUN chmod +x /actor/run-actor.sh
 RUN chmod 755 -R /actor
 RUN chmod 777 -R /workdir
